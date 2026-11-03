@@ -117,7 +117,7 @@ func (l *Logger) write(level klog.Level, message string) {
 	if strings.HasSuffix(file, "/pkg/klog/default.go") {
 		pc, file, line, ok = runtime.Caller(3)
 	}
-	record := startupEntry{level: level, entry: zapcore.Entry{Level: zapLevel(level), Time: time.Now(), Message: message, Caller: zapcore.NewEntryCaller(pc, file, line, ok)}}
+	record := startupEntry{level: level, entry: zapcore.Entry{Level: zapLevel(level), Time: time.Now(), LoggerName: moduleForCaller(pc), Message: message, Caller: zapcore.NewEntryCaller(pc, file, line, ok)}}
 	if l.buffering {
 		l.mu.RUnlock()
 		l.mu.Lock()

@@ -74,7 +74,7 @@ func TestKitexMethodsLevelsAndCaller(t *testing.T) {
 		t.Fatalf("wrong entry count: %d", len(got))
 	}
 	for i, entry := range got {
-		if entry["msg"] != want[i] || entry["ts"] == nil || !strings.Contains(entry["caller"].(string), "adapter/logger_test.go:") {
+		if entry["msg"] != want[i] || entry["ts"] == nil || entry["module"] != "logging" || !strings.Contains(entry["caller"].(string), "adapter/logger_test.go:") {
 			t.Fatalf("incorrect message or caller: %v", entry)
 		}
 	}

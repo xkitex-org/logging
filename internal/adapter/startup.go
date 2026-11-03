@@ -32,7 +32,7 @@ func (l *Logger) emit(record startupEntry) {
 // queueOrWrite 在配置前暂存日志，超出上限时一次性输出缓存并转为默认输出，不丢弃记录。
 func (l *Logger) queueOrWrite(record startupEntry) {
 	if l.buffering {
-		size := len(record.entry.Message) + len(record.entry.Caller.File) + len(record.entry.Caller.Function) + 128
+		size := len(record.entry.Message) + len(record.entry.LoggerName) + len(record.entry.Caller.File) + len(record.entry.Caller.Function) + 128
 		if len(l.startup) < maxStartupEntries && size <= maxStartupBytes-l.startupBytes {
 			l.startup = append(l.startup, record)
 			l.startupBytes += size
@@ -40,7 +40,7 @@ func (l *Logger) queueOrWrite(record startupEntry) {
 		}
 		l.flushStartup()
 		l.buffering = false
-		l.emit(startupEntry{level: klog.LevelWarn, entry: zapcore.Entry{Level: zapcore.WarnLevel, Time: record.entry.Time, Message: "logging: 启动日志缓存达到上限，后续启动日志使用默认输出"}})
+		l.emit(startupEntry{level: klog.LevelWarn, entry: zapcore.Entry{Level: zapcore.WarnLevel, Time: record.entry.Time, LoggerName: "logging", Message: "logging: 启动日志缓存达到上限，后续启动日志使用默认输出"}})
 	}
 	l.emit(record)
 }

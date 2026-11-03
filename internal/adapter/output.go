@@ -25,9 +25,10 @@ type writerSyncer struct{ io.Writer }
 // Sync 为非持有输出提供无副作用的刷新实现。
 func (writerSyncer) Sync() error { return nil }
 
-// encoder 创建无颜色编码器；JSON 和控制台均包含时间、级别及调用位置。
+// encoder 创建无颜色编码器；JSON 和控制台均包含模块、时间、级别及调用位置。
 func encoder(format string) zapcore.Encoder {
 	cfg := zap.NewProductionEncoderConfig()
+	cfg.NameKey = "module"
 	cfg.EncodeTime = zapcore.ISO8601TimeEncoder
 	if format == "json" {
 		return zapcore.NewJSONEncoder(cfg)

@@ -46,7 +46,7 @@ func TestStartupReplayUsesFinalOutputAndOriginalMetadata(t *testing.T) {
 		t.Fatalf("unexpected count: %d", len(got))
 	}
 	for i, entry := range got {
-		if entry["msg"] != want[i] {
+		if entry["msg"] != want[i] || entry["module"] != "logging" {
 			t.Fatal("replayed records were reordered or duplicated")
 		}
 		if i < 3 {
