@@ -27,7 +27,7 @@ func main() {
 
 core 与 logging 均通过正式 v0.0.1 模块依赖接入，两个模块各自独立，不使用 go.work 或 replace。
 
-没传 WithLogger 时 core 保留当前 Kitex 行为，不管理 logger。传入后，core 在读取 Consul 前安装默认 Info 级别、console 格式、stderr 输出的实例；配置合并后再下发 logging 节，并在退出时释放资源。配置只应用一次，修改 Consul 后需要重启应用。
+没传 WithLogger 时 core 保留当前 Kitex 行为，不管理 logger。传入后，core 在读取 Consul 前安装带启动缓存的实例；配置合并后再下发 logging 节，并在退出时释放资源。配置只应用一次，修改 Consul 后需要重启应用。
 
 ## Consul 配置
 
@@ -55,7 +55,11 @@ max_size 必须大于 0，max_backups 和 max_age 不小于 0；后两项的 0 �
 
 ## 输出和退出
 
-业务和框架统一通过 `klog` 输出。配置加载过程使用默认控制台输出；文件和自定义格式从 logging 配置成功后开始生效，不回放之前的日志。配置错误保留原默认输出，不能静默退回默认后继续启动。
+业务和框架统一通过 `klog` 输出。配置成功前的日志先暂存，配置成功后按原始顺序输出到最终后端，使用最终格式与级别过滤，并保留原时间和调用位置。因此配置来源、各文件读取和解析、合并等启动日志也能统一写入 JSON 文件。配置缺省时在 core 下发 nil 后以默认 Info/console 配置输出。
+
+配置解析或文件初始化失败时，立即按默认格式输出缓存；Consul 读取等更早阶段失败时，由 core 的 Close 输出缓存和错误。显式 Sync、Fatal 或 Close 也会输出缓存。缓存最多 256 条且计入的日志数据不超过 64 KiB；达到任一上限后先输出缓存和一次提示，后续启动日志直接使用默认输出，避免无限占用内存，不静默丢弃日志。默认输出遵循当前级别，默认 Info；正常成功后按最终配置过滤，包括配置前产生的 Debug/Trace。
+
+依赖库初始化时直接写 stderr 的警告不经过 klog，不能由本缓存统一格式。
 
 适配器支持 Kitex 的 SetLevel 和 SetOutput，二者与输出、配置及关闭使用同一读写锁协调；SetOutput 替换当前输出，但不接管业务传入 Writer 的 Close/Sync。正常退出和启动失败均由 core 调用 Close，先输出最后的服务结果日志再刷新和关闭文件。Close 幂等，关闭后保留控制台输出供 Server 返回后的错误处理使用。Fatal 会先写入并关闭日志，再以状态 1 退出；与 Kitex 默认 Fatal 相同，它不会走服务优雅停机。
 

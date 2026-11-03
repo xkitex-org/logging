@@ -22,6 +22,12 @@ func TestNewDoesNotInstallLoggerOrReadEnvironment(t *testing.T) {
 	l.SetOutput(&output)
 	l.Debug("debug-marker")
 	l.Info("info-marker")
+	if output.Len() != 0 {
+		t.Fatal("startup output was not buffered")
+	}
+	if err := l.(interface{ Close() error }).Close(); err != nil {
+		t.Fatal(err)
+	}
 	if strings.Contains(output.String(), "debug-marker") || !strings.Contains(output.String(), "info-marker") {
 		t.Fatal("default level depends on environment")
 	}

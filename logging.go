@@ -7,7 +7,7 @@ import (
 	"go.chaoxizhongzhi.com/xkitex/logging/internal/adapter"
 )
 
-// New 创建默认 Info 级别的控制台 logger，不读取环境变量或配置，不安装全局 logger 或创建文件。
+// New 创建带有界启动日志缓存的 logger，不读取环境变量或配置，不安装全局 logger 或创建文件。
 // 传给 core.WithLogger 后，由 core 下发 logging 节，并在退出时调用该实例的 Close。
 func New() klog.FullLogger {
 	return adapter.New()

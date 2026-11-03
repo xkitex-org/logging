@@ -17,27 +17,31 @@ import (
 
 // Logger 在固定实例内配置输出，避免服务启动后再次替换 Kitex 全局 logger。
 type Logger struct {
-	mu         sync.RWMutex
-	backend    *backend
-	settings   config.Settings
-	level      klog.Level
-	configured bool
-	closed     bool
-	closeErr   error
+	mu           sync.RWMutex
+	backend      *backend
+	settings     config.Settings
+	level        klog.Level
+	configured   bool
+	closed       bool
+	closeErr     error
+	buffering    bool
+	startup      []startupEntry
+	startupBytes int
 }
 
 var _ klog.FullLogger = (*Logger)(nil)
 
-// New 创建无文件、无全局副作用的默认控制台实现。
+// New 创建无文件、无全局副作用的日志实现，配置成功前暂存有界启动日志。
 func New() *Logger {
 	cfg := config.Defaults()
-	return &Logger{backend: writerBackend(cfg, os.Stderr), settings: cfg, level: klog.LevelInfo}
+	return &Logger{backend: writerBackend(cfg, os.Stderr), settings: cfg, level: klog.LevelInfo, buffering: true}
 }
 
 // ConfigureLogging 单次应用合并后的 logging 节，校验及文件打开成功后才替换默认输出。
 func (l *Logger) ConfigureLogging(body []byte) error {
 	cfg, err := config.Parse(body)
 	if err != nil {
+		l.finishStartup()
 		return err
 	}
 	l.mu.Lock()
@@ -47,10 +51,14 @@ func (l *Logger) ConfigureLogging(body []byte) error {
 	}
 	next, err := configuredBackend(cfg)
 	if err != nil {
+		l.flushStartup()
+		l.buffering = false
 		return err
 	}
 	l.closeErr = errors.Join(l.closeErr, l.backend.close())
 	l.backend, l.settings, l.level, l.configured = next, cfg, kitexLevel(cfg.Level), true
+	l.flushStartup()
+	l.buffering = false
 	return nil
 }
 
@@ -75,10 +83,12 @@ func (l *Logger) SetOutput(writer io.Writer) {
 	l.backend = writerBackend(l.settings, writer)
 }
 
-// Sync 刷新当前输出；控制台和普通 Writer 不执行文件系统 Sync，避免终端的无效参数错误。
+// Sync 显式刷新时结束启动缓存并输出到当前后端；终端和普通 Writer 不执行文件系统 Sync。
 func (l *Logger) Sync() error {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.flushStartup()
+	l.buffering = false
 	return l.backend.core.Sync()
 }
 
@@ -87,6 +97,8 @@ func (l *Logger) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.closed {
+		l.flushStartup()
+		l.buffering = false
 		l.closeErr = errors.Join(l.closeErr, l.backend.close())
 		l.backend = writerBackend(l.settings, os.Stderr)
 		l.closed = true
@@ -97,18 +109,24 @@ func (l *Logger) Close() error {
 // write 按 Kitex 级别过滤，经 Zap 编码输出，并将调用位置定位到业务或框架调用处。
 func (l *Logger) write(level klog.Level, message string) {
 	l.mu.RLock()
-	if level >= l.level {
-		pc, file, line, ok := runtime.Caller(2)
-		if strings.HasSuffix(file, "/pkg/klog/default.go") {
-			pc, file, line, ok = runtime.Caller(3)
-		}
-		entry := zapcore.Entry{Level: zapLevel(level), Time: time.Now(), Message: message, Caller: zapcore.NewEntryCaller(pc, file, line, ok)}
-		if checked := l.backend.core.Check(entry, nil); checked != nil {
-			checked.ErrorOutput = zapcore.Lock(writerSyncer{os.Stderr})
-			checked.Write()
-		}
+	if !l.buffering && level < l.level {
+		l.mu.RUnlock()
+		return
 	}
-	l.mu.RUnlock()
+	pc, file, line, ok := runtime.Caller(2)
+	if strings.HasSuffix(file, "/pkg/klog/default.go") {
+		pc, file, line, ok = runtime.Caller(3)
+	}
+	record := startupEntry{level: level, entry: zapcore.Entry{Level: zapLevel(level), Time: time.Now(), Message: message, Caller: zapcore.NewEntryCaller(pc, file, line, ok)}}
+	if l.buffering {
+		l.mu.RUnlock()
+		l.mu.Lock()
+		l.queueOrWrite(record)
+		l.mu.Unlock()
+	} else {
+		l.emit(record)
+		l.mu.RUnlock()
+	}
 	if level == klog.LevelFatal {
 		_ = l.Close()
 		os.Exit(1)
