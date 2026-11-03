@@ -34,11 +34,13 @@ core 与 logging 均通过正式 v0.0.1 模块依赖接入，两个模块各自�
 ```yaml
 logging:
   level: info
-  format: json
+  format: console
   console: true
   file:
     enabled: true
     path: ./logs/application.log
+    formats: [json, console]
+    error: true
     max_size: 100
     max_backups: 10
     max_age: 7
@@ -47,7 +49,7 @@ logging:
 
 缺省配置为 level=info、format=console、console=true、file.enabled=false；文件轮转缺省为 max_size=100 MB、max_backups=10、max_age=7 天、compress=false。启用文件时必须配置 path，可使用相对当前工作目录的路径；创建父目录并提前检查文件可写性，失败时阻止服务启动。控制台和文件输出至少启用一个。
 
-level 支持 trace、debug、info、notice、warn、error、fatal；过滤保留 Kitex 七级语义，编码时 Trace 对应 Zap Debug，Notice 对应 Zap Info。format 支持 json 和 console，均输出模块、时间、级别、调用位置及消息，不开启颜色。Ctx 方法与格式化方法行为一致，当前不自动从上下文添加追踪标识或其他字段。
+level 支持 trace、debug、info、notice、warn、error、fatal；过滤保留 Kitex 七级语义，编码时 Trace 对应 Zap Debug，Notice 对应 Zap Info。format 支持 json 和 console，控制控制台及未单独指定格式时的文件编码；均输出模块、时间、级别、调用位置及消息，不开启颜色。Ctx 方法与格式化方法行为一致，当前不自动从上下文添加追踪标识或其他字段。
 
 max_size 必须大于 0，max_backups 和 max_age 不小于 0；后两项的 0 分别表示不按数量和天数清理备份。未知字段、错误类型、null、多文档和无效值均报错，错误中不输出原始配置值。文件轮转及 gzip 压缩由 Lumberjack 完成，压缩和备份清理由其后台执行；同一日志文件只应由一个进程写入。
 
@@ -90,3 +92,23 @@ GOWORK=off GOTOOLCHAIN=local go build ./...
 模块信息只读取一次，调用位置的识别结果通过 `sync.Map` 缓存，后续同一位置直接使用缓存。启动日志产生时就保存模块名，重放时保持原值。
 
 这是按 Go 模块归属划分：core 中的 config、startup 等包都显示 `core`。无法识别时输出 `unknown`；模块短名相同的不同依赖不会自动区分命名空间。识别不读取日志正文，也不从本机源码目录或模块缓存目录猜测模块。
+
+
+## 多文件与错误分流
+
+`logging.file.path` 继续作为文件路径入口；开启文件并设置 `formats: [json, console]`、`error: true` 后，上面的示例会生成：
+
+| 输出 | 路径或位置 | 内容 |
+| --- | --- | --- |
+| 普通全量日志 | `./logs/application.log` | 通过全局级别过滤的全部日志，普通文本 |
+| JSON 全量日志 | `./logs/application.json.log` | 同一批日志，JSON 每行一条 |
+| 错误专用日志 | `./logs/application.error.log` | Error 及 Fatal，格式沿用 logging.format |
+| 控制台 | stderr | 格式沿用 logging.format，示例为普通文本 |
+
+Error 同时保留在两份全量文件，不会从全量日志中移除。三个文件各自使用独立的 Lumberjack 轮转器，共用配置中的轮转大小、保留数量、天数和压缩策略。启动缓存重放、module/caller/time、级别过滤、Fatal 刷新及 Close 同样覆盖全部输出。
+
+formats 可选择 json、console 或两者，不能重复或显式设置为空列表。不配置 formats 时保持原单文件行为，使用 logging.format 写入 file.path；error 缺省为 false。只选择一种格式时仍使用 file.path，同时选择两种时普通文本使用原路径、JSON 在扩展名前加 `.json`。错误文件在扩展名前加 `.error`；没有扩展名时直接追加相应后缀。
+
+任一输出文件不能初始化时整体配置失败，保留原输出；不会静默跳过某份文件。SetOutput 会替换全部文件输出并关闭持有文件，Close 后只保留控制台回退输出。
+
+共享的格式与轮转参数可放在 `config/zmall/logging.yaml`，业务的 `logging.file.path` 继续放在 `config/zmall/product/application.yaml`，由 core 合并后生效。

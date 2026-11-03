@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -19,12 +20,14 @@ type Settings struct {
 
 // File 描述单进程文件输出及 Lumberjack 轮转设置，大小单位为 MB，保留时间单位为天。
 type File struct {
-	Enabled    bool   `yaml:"enabled"`
-	Path       string `yaml:"path"`
-	MaxSize    int    `yaml:"max_size"`
-	MaxBackups int    `yaml:"max_backups"`
-	MaxAge     int    `yaml:"max_age"`
-	Compress   bool   `yaml:"compress"`
+	Enabled    bool     `yaml:"enabled"`
+	Formats    []string `yaml:"formats"`
+	Error      bool     `yaml:"error"`
+	Path       string   `yaml:"path"`
+	MaxSize    int      `yaml:"max_size"`
+	MaxBackups int      `yaml:"max_backups"`
+	MaxAge     int      `yaml:"max_age"`
+	Compress   bool     `yaml:"compress"`
 }
 
 // Defaults 返回无文件输出的默认配置，不依赖环境变量。
@@ -61,6 +64,20 @@ func Parse(body []byte) (Settings, error) {
 	if cfg.Format != "json" && cfg.Format != "console" {
 		return Settings{}, errors.New("logging: format must be json or console")
 	}
+	if cfg.File.Formats != nil {
+		if len(cfg.File.Formats) == 0 {
+			return Settings{}, errors.New("logging: file.formats must not be empty")
+		}
+		seen := make(map[string]bool)
+		for i, format := range cfg.File.Formats {
+			format = strings.ToLower(strings.TrimSpace(format))
+			if format != "json" && format != "console" || seen[format] {
+				return Settings{}, errors.New("logging: file.formats must contain distinct json or console values")
+			}
+			cfg.File.Formats[i] = format
+			seen[format] = true
+		}
+	}
 	if cfg.File.MaxSize <= 0 || cfg.File.MaxBackups < 0 || cfg.File.MaxAge < 0 {
 		return Settings{}, errors.New("logging: file.max_size must be positive; file.max_backups and file.max_age must be nonnegative")
 	}
@@ -78,10 +95,5 @@ func containsNull(node *yaml.Node) bool {
 	if node.Tag == "!!null" {
 		return true
 	}
-	for _, child := range node.Content {
-		if containsNull(child) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(node.Content, containsNull)
 }
