@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"os"
 	"slices"
 	"strings"
 
@@ -23,7 +24,7 @@ type File struct {
 	Enabled    bool     `yaml:"enabled"`
 	Formats    []string `yaml:"formats"`
 	Error      bool     `yaml:"error"`
-	Path       string   `yaml:"path"`
+	Path       string   `yaml:"-"`
 	MaxSize    int      `yaml:"max_size"`
 	MaxBackups int      `yaml:"max_backups"`
 	MaxAge     int      `yaml:"max_age"`
@@ -32,12 +33,16 @@ type File struct {
 
 // Defaults 返回无文件输出的默认配置，不依赖环境变量。
 func Defaults() Settings {
-	return Settings{Level: "info", Format: "console", Console: true, File: File{MaxSize: 100, MaxBackups: 10, MaxAge: 7}}
+	return Settings{Level: "info", Format: "console", Console: true, File: File{Path: "/logs/app.log", MaxSize: 100, MaxBackups: 10, MaxAge: 7}}
 }
 
-// Parse 只解析 logging 节，拒绝非法字段、null 和多文档，错误中不附带原始值。
+// Parse 解析 logging 节，并在启动配置时读取一次 X_LOGGING_FILE；路径不接受 YAML 配置。
+// 拒绝非法字段、null 和多文档，错误中不附带原始值。
 func Parse(body []byte) (Settings, error) {
 	cfg := Defaults()
+	if path := os.Getenv("X_LOGGING_FILE"); path != "" {
+		cfg.File.Path = path
+	}
 	if len(body) == 0 {
 		return cfg, nil
 	}
@@ -82,7 +87,7 @@ func Parse(body []byte) (Settings, error) {
 		return Settings{}, errors.New("logging: file.max_size must be positive; file.max_backups and file.max_age must be nonnegative")
 	}
 	if cfg.File.Enabled && (strings.TrimSpace(cfg.File.Path) == "" || strings.ContainsRune(cfg.File.Path, '\x00')) {
-		return Settings{}, errors.New("logging: file.path is required and must be a valid path when file output is enabled")
+		return Settings{}, errors.New("logging: X_LOGGING_FILE must name a valid file when file output is enabled")
 	}
 	if !cfg.Console && !cfg.File.Enabled {
 		return Settings{}, errors.New("logging: at least one output must be enabled")

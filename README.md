@@ -2,7 +2,7 @@
 
 独立模块 `go.chaoxizhongzhi.com/xkitex/logging`，基于 Zap v1.28.0 和 Lumberjack v2.2.1，实现 Kitex v0.16.4 的 `klog.FullLogger`。Go 最低版本与 core 一致，为 1.25.9。
 
-根包只公开 `New()`，内部适配、配置解析和文件轮转均放在 `internal`。不使用 `init()` 自动接管日志，也不从环境变量读取日志配置；导入包、调用 `New()` 都不安装全局日志实现、不读取 Consul、不创建文件。
+根包只公开 `New()`，内部适配、配置解析和文件轮转均放在 `internal`。不使用 `init()` 自动接管日志，仅文件路径从 `X_LOGGING_FILE` 读取，其余日志配置由 core 下发；导入包、调用 `New()` 都不安装全局日志实现、不读取 Consul、不创建文件。
 
 ## 业务接入
 
@@ -27,7 +27,7 @@ func main() {
 
 core 与 logging 均通过正式 v0.0.1 模块依赖接入，两个模块各自独立，不使用 go.work 或 replace。
 
-没传 `WithLogger` 时，core 保留当前 Kitex 行为，不管理日志实现。传入后，core 在读取 Consul 前安装带启动缓存的实例；配置合并后再下发 logging 节，并在退出时释放资源。配置只应用一次，修改 Consul 后需要重启应用。
+没传 `WithLogger` 时，core 保留当前 Kitex 行为，不管理日志实现。传入后，core 在读取 Consul 前安装带启动缓存的实例；配置合并后再下发 logging 节，并在退出时释放资源。配置只应用一次，修改 Consul 或 X_LOGGING_FILE 后需要重启应用。文件路径在 ConfigureLogging 时读取一次，调用 New 不读取环境变量。
 
 ## Consul 配置
 
@@ -38,7 +38,6 @@ logging:
   console: true
   file:
     enabled: true
-    path: ./logs/application.log
     formats: [json, console]
     error: true
     max_size: 100
@@ -47,7 +46,7 @@ logging:
     compress: true
 ```
 
-缺省配置为 level=info、format=console、console=true、file.enabled=false；文件轮转缺省为 max_size=100 MB、max_backups=10、max_age=7 天、compress=false。启用文件时必须配置 path，可使用相对当前工作目录的路径；创建父目录并提前检查文件可写性，失败时阻止服务启动。控制台和文件输出至少启用一个。
+缺省配置为 level=info、format=console、console=true、file.enabled=false；文件轮转缺省为 max_size=100 MB、max_backups=10、max_age=7 天、compress=false。文件路径仅由环境变量 `X_LOGGING_FILE` 指定，未设置或为空时默认 `/logs/app.log`；可使用相对当前工作目录的路径。Consul 不再支持 `logging.file.path`，旧字段会按未知字段报错；创建父目录并提前检查文件可写性，失败时阻止服务启动。控制台和文件输出至少启用一个。
 
 level 支持 trace、debug、info、notice、warn、error、fatal；过滤保留 Kitex 七级语义，编码时 Trace 对应 Zap Debug，Notice 对应 Zap Info。format 支持 json 和 console，控制控制台及未单独指定格式时的文件编码；均输出模块、时间、级别、调用位置及消息，不开启颜色。Ctx 方法与格式化方法行为一致，当前不自动从上下文添加追踪标识或其他字段。
 
@@ -96,19 +95,27 @@ GOWORK=off GOTOOLCHAIN=local go build ./...
 
 ## 多文件与错误分流
 
-`logging.file.path` 继续作为文件路径入口；开启文件并设置 `formats: [json, console]`、`error: true` 后，上面的示例会生成：
+`X_LOGGING_FILE` 是唯一文件路径入口，默认 `/logs/app.log`；开启文件并设置 `formats: [json, console]`、`error: true` 后，上面的示例会生成：
 
 | 输出 | 路径或位置 | 内容 |
 | --- | --- | --- |
-| 普通全量日志 | `./logs/application.log` | 通过全局级别过滤的全部日志，普通文本 |
-| JSON 全量日志 | `./logs/application.json.log` | 同一批日志，JSON 每行一条 |
-| 错误专用日志 | `./logs/application.error.log` | Error 及 Fatal，格式沿用 logging.format |
+| 普通全量日志 | `/logs/app.log` | 通过全局级别过滤的全部日志，普通文本 |
+| JSON 全量日志 | `/logs/app.json.log` | 同一批日志，JSON 每行一条 |
+| 错误专用日志 | `/logs/app.error.log` | Error 及 Fatal，格式沿用 logging.format |
 | 控制台 | stderr | 格式沿用 logging.format，示例为普通文本 |
 
 Error 同时保留在两份全量文件，不会从全量日志中移除。三个文件各自使用独立的 Lumberjack 轮转器，共用配置中的轮转大小、保留数量、天数和压缩策略。启动缓存重放、module/caller/time、级别过滤、Fatal 刷新及 Close 同样覆盖全部输出。
 
-formats 可选择 json、console 或两者，不能重复或显式设置为空列表。不配置 formats 时保持原单文件行为，使用 logging.format 写入 file.path；error 缺省为 false。只选择一种格式时仍使用 file.path，同时选择两种时普通文本使用原路径、JSON 在扩展名前加 `.json`。错误文件在扩展名前加 `.error`；没有扩展名时直接追加相应后缀。
+formats 可选择 json、console 或两者，不能重复或显式设置为空列表。不配置 formats 时保持原单文件行为，使用 logging.format 写入 X_LOGGING_FILE 对应路径；error 缺省为 false。只选择一种格式时仍使用 X_LOGGING_FILE 对应路径，同时选择两种时普通文本使用原路径、JSON 在扩展名前加 `.json`。错误文件在扩展名前加 `.error`；没有扩展名时直接追加相应后缀。
 
 任一输出文件不能初始化时整体配置失败，保留原输出；不会静默跳过某份文件。SetOutput 会替换全部文件输出并关闭持有文件，Close 后只保留控制台回退输出。
 
-共享的格式与轮转参数可放在 `config/zmall/logging.yaml`，业务的 `logging.file.path` 继续放在 `config/zmall/product/application.yaml`，由 core 合并后生效。
+共享的格式与轮转参数继续放在 Consul 的 logging 节中，由 core 合并后下发；文件路径不再由 application.yaml 或 imports 提供。应用和容器启动脚本统一使用 `X_LOGGING_FILE`，例如：
+
+```sh
+export X_LOGGING_FILE=/logs/app.log
+```
+
+容器挂载 `/logs` 保存日志；需要改变文件位置时覆盖 X_LOGGING_FILE，普通、JSON 与错误文件会按同一基准路径派生。文件开关、格式和轮转参数仍由 Consul 控制，设置路径不会自动开启文件输出。
+
+发布切换时，先准备新版 logging 正式依赖和应用镜像，再协调删除合并配置中的旧 `logging.file.path`（包括 application.yaml 和 imports）并启动新版。旧版 logging 仍依赖 YAML path，不能提前仅删 Consul 字段。应用是否已更新正式依赖和完成环境配置切换应单独核对；发布模块不代表生产已切换。

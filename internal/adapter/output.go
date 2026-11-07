@@ -42,7 +42,7 @@ func writerBackend(cfg config.Settings, writer io.Writer) *backend {
 	return &backend{core: zapcore.NewCore(encoder(cfg.Format), zapcore.Lock(writerSyncer{writer}), zapcore.DebugLevel)}
 }
 
-// sidecarPath 在扩展名前加入类型标识，保留 file.path 作为普通日志或兼容单文件的路径。
+// sidecarPath 在扩展名前加入类型标识，保留 X_LOGGING_FILE 的解析结果作为普通日志或单文件路径。
 func sidecarPath(path, kind string) string {
 	extension := filepath.Ext(path)
 	return strings.TrimSuffix(path, extension) + "." + kind + extension
@@ -51,11 +51,11 @@ func sidecarPath(path, kind string) string {
 // openLogFile 提前检查可写性，并为每个日志文件创建独立的轮转实例。
 func openLogFile(path string, cfg config.File) (*lumberjack.Logger, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return nil, errors.New("logging: cannot create log directory; check file.path and permissions")
+		return nil, errors.New("logging: cannot create log directory; check X_LOGGING_FILE and permissions")
 	}
 	probe, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
-		return nil, errors.New("logging: cannot open log file; check file.path and permissions")
+		return nil, errors.New("logging: cannot open log file; check X_LOGGING_FILE and permissions")
 	}
 	if err := probe.Close(); err != nil {
 		return nil, errors.New("logging: cannot close log file during initialization")
