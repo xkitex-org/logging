@@ -14,10 +14,11 @@ import (
 	"go.chaoxizhongzhi.com/xkitex/logging/internal/config"
 )
 
-// backend 将每个 Zap 输出绑定到各自的格式、级别及轮转文件，受 Logger 的读写锁保护。
+// backend 将每个 Zap 输出绑定到各自的格式、级别及轮转文件，并持有可选的 SLS 发送器。
 type backend struct {
 	core  zapcore.Core
 	files []*lumberjack.Logger
+	sls   *slsSender
 }
 
 // writerSyncer 仅包装 Write，不擅自刷新终端或接管业务 Writer 的生命周期。
@@ -101,14 +102,25 @@ func configuredBackend(cfg config.Settings) (result *backend, err error) {
 			cores = append(cores, zapcore.NewCore(encoder(cfg.Format), zapcore.AddSync(file), zap.LevelEnablerFunc(func(level zapcore.Level) bool { return level >= zapcore.ErrorLevel })))
 		}
 	}
+	if cfg.SLS != nil {
+		remote, openErr := newSLSCore(*cfg.SLS, cfg.Format)
+		if openErr != nil {
+			return result, openErr
+		}
+		result.sls = remote.sender
+		cores = append(cores, remote)
+	}
 	result.core = zapcore.NewTee(cores...)
 	return result, nil
 }
 
-// close 刷新所有 Zap 输出后关闭每个轮转文件，不关闭控制台或业务 Writer。
+// close 等待可选发送器并关闭每个轮转文件，不关闭控制台或业务 Writer。
 func (b *backend) close() error {
 	var err error
-	if b.core != nil {
+	if b.sls != nil {
+		// 发送器关闭本身负责排空和等待，避免先 Sync 再 Close 重复等待两次。
+		err = b.sls.close()
+	} else if b.core != nil {
 		err = b.core.Sync()
 	}
 	for _, file := range b.files {

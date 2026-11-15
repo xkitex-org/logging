@@ -26,10 +26,11 @@ func TestFourOutputsAndStartupReplay(t *testing.T) {
 	os.Stderr = console
 	defer func() { os.Stderr = previous }()
 	path := filepath.Join(dir, "application.log")
+	t.Setenv("X_LOGGING_FILE", path)
 	l := New()
 	l.Info("startup-info-marker")
 	l.Error("startup-error-marker")
-	body := fmt.Sprintf("format: console\nconsole: true\nfile: {enabled: true, path: %q, formats: [json, console], error: true}", path)
+	body := "format: console\nconsole: true\nfile: {enabled: true, formats: [json, console], error: true}"
 	if err := l.ConfigureLogging([]byte(body)); err != nil {
 		t.Fatal(err)
 	}
@@ -75,8 +76,9 @@ func TestFourOutputsAndStartupReplay(t *testing.T) {
 // TestAllFilesRotateIndependently 验证三份文件分别轮转、压缩并保留全部错误记录。
 func TestAllFilesRotateIndependently(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "application.log")
+	t.Setenv("X_LOGGING_FILE", path)
 	l := New()
-	cfg := fmt.Sprintf("format: console\nconsole: false\nfile: {enabled: true, path: %q, formats: [json, console], error: true, max_size: 1, max_backups: 2, compress: true}", path)
+	cfg := "format: console\nconsole: false\nfile: {enabled: true, formats: [json, console], error: true, max_size: 1, max_backups: 2, compress: true}"
 	if err := l.ConfigureLogging([]byte(cfg)); err != nil {
 		t.Fatal(err)
 	}
@@ -134,13 +136,14 @@ func TestAllFilesRotateIndependently(t *testing.T) {
 // TestCompanionFailureKeepsExistingBackend 验证任意伴随文件不可写时整体配置失败，并保留可用的默认输出。
 func TestCompanionFailureKeepsExistingBackend(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "application.log")
+	t.Setenv("X_LOGGING_FILE", path)
 	if err := os.Mkdir(sidecarPath(path, "json"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	l := New()
 	var fallback bytes.Buffer
 	l.SetOutput(&fallback)
-	cfg := fmt.Sprintf("file: {enabled: true, path: %q, formats: [console, json], error: true}", path)
+	cfg := "file: {enabled: true, formats: [console, json], error: true}"
 	if err := l.ConfigureLogging([]byte(cfg)); err == nil || strings.Contains(err.Error(), path) {
 		t.Fatal("invalid companion accepted or path leaked")
 	}
@@ -154,8 +157,9 @@ func TestCompanionFailureKeepsExistingBackend(t *testing.T) {
 // TestMultiFileFatalFlushes 验证 Fatal 在进程退出前写入并关闭全部三份日志文件。
 func TestMultiFileFatalFlushes(t *testing.T) {
 	if path := os.Getenv("XKITEX_MULTI_FATAL_TEST_FILE"); path != "" {
+		t.Setenv("X_LOGGING_FILE", path)
 		l := New()
-		cfg := fmt.Sprintf("format: console\nconsole: false\nfile: {enabled: true, path: %q, formats: [json, console], error: true}", path)
+		cfg := "format: console\nconsole: false\nfile: {enabled: true, formats: [json, console], error: true}"
 		if err := l.ConfigureLogging([]byte(cfg)); err != nil {
 			panic(err)
 		}
@@ -163,6 +167,7 @@ func TestMultiFileFatalFlushes(t *testing.T) {
 		return
 	}
 	path := filepath.Join(t.TempDir(), "fatal.log")
+	t.Setenv("X_LOGGING_FILE", path)
 	child := exec.Command(os.Args[0], "-test.run=^TestMultiFileFatalFlushes$")
 	child.Env = append(os.Environ(), "XKITEX_MULTI_FATAL_TEST_FILE="+path)
 	err := child.Run()

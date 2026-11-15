@@ -28,7 +28,8 @@ func TestStartupReplayUsesFinalOutputAndOriginalMetadata(t *testing.T) {
 	time.Sleep(3 * time.Millisecond)
 	configuredAt := time.Now()
 	path := filepath.Join(t.TempDir(), "startup.log")
-	cfg := fmt.Sprintf("level: trace\nformat: json\nconsole: false\nfile: {enabled: true, path: %q}", path)
+	t.Setenv("X_LOGGING_FILE", path)
+	cfg := "level: trace\nformat: json\nconsole: false\nfile: {enabled: true}"
 	if err := l.ConfigureLogging([]byte(cfg)); err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +72,8 @@ func TestStartupReplayUsesConfiguredLevel(t *testing.T) {
 	l.Info("filtered-info")
 	l.Warn("kept-warning")
 	path := filepath.Join(t.TempDir(), "warn.log")
-	if err := l.ConfigureLogging([]byte(fmt.Sprintf("level: warn\nformat: json\nconsole: false\nfile: {enabled: true, path: %q}", path))); err != nil {
+	t.Setenv("X_LOGGING_FILE", path)
+	if err := l.ConfigureLogging([]byte("level: warn\nformat: json\nconsole: false\nfile: {enabled: true}")); err != nil {
 		t.Fatal(err)
 	}
 	_ = l.Close()
@@ -158,6 +160,7 @@ func TestStartupBufferLimitsFlushWithoutLoss(t *testing.T) {
 func TestConcurrentStartupAndConfiguration(t *testing.T) {
 	l := New()
 	path := filepath.Join(t.TempDir(), "concurrent.log")
+	t.Setenv("X_LOGGING_FILE", path)
 	var group sync.WaitGroup
 	for i := 0; i < 4; i++ {
 		group.Add(1)
@@ -168,7 +171,7 @@ func TestConcurrentStartupAndConfiguration(t *testing.T) {
 			}
 		}(i)
 	}
-	if err := l.ConfigureLogging([]byte(fmt.Sprintf("format: json\nconsole: false\nfile: {enabled: true,path: %q}", path))); err != nil {
+	if err := l.ConfigureLogging([]byte("format: json\nconsole: false\nfile: {enabled: true}")); err != nil {
 		t.Fatal(err)
 	}
 	group.Wait()

@@ -87,8 +87,9 @@ func TestKitexMethodsLevelsAndCaller(t *testing.T) {
 func TestFileRotationCompressionAndClose(t *testing.T) {
 	dir := t.TempDir()
 	filename := filepath.Join(dir, "nested", "application.log")
+	t.Setenv("X_LOGGING_FILE", filename)
 	l := New()
-	body := fmt.Sprintf("format: json\nconsole: false\nfile: {enabled: true, path: %q, max_size: 1, max_backups: 2, max_age: 7, compress: true}", filename)
+	body := "format: json\nconsole: false\nfile: {enabled: true, max_size: 1, max_backups: 2, max_age: 7, compress: true}"
 	if err := l.ConfigureLogging([]byte(body)); err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +165,8 @@ func TestConfigurationFailureKeepsDefaultAndReportsSafeError(t *testing.T) {
 		t.Fatal("invalid configuration accepted or exposed")
 	}
 	dir := t.TempDir()
-	if err := l.ConfigureLogging([]byte(fmt.Sprintf("file: {enabled: true, path: %q}", dir))); err == nil || strings.Contains(err.Error(), dir) {
+	t.Setenv("X_LOGGING_FILE", dir)
+	if err := l.ConfigureLogging([]byte("file: {enabled: true}")); err == nil || strings.Contains(err.Error(), dir) {
 		t.Fatal("directory accepted as a log file or path exposed in error")
 	}
 	l.Info("default-still-works")
@@ -209,14 +211,16 @@ func TestConcurrentOutputAndControls(t *testing.T) {
 // TestFatalFlushesFileAndExits 验证 Fatal 写入并关闭文件后以状态 1 退出，不依赖 defer 执行。
 func TestFatalFlushesFileAndExits(t *testing.T) {
 	if filename := os.Getenv("XKITEX_FATAL_TEST_FILE"); filename != "" {
+		t.Setenv("X_LOGGING_FILE", filename)
 		l := New()
-		if err := l.ConfigureLogging([]byte(fmt.Sprintf("format: json\nconsole: false\nfile: {enabled: true, path: %q}", filename))); err != nil {
+		if err := l.ConfigureLogging([]byte("format: json\nconsole: false\nfile: {enabled: true}")); err != nil {
 			panic(err)
 		}
 		l.Fatalf("fatal-%d", 42)
 		return
 	}
 	filename := filepath.Join(t.TempDir(), "fatal.log")
+	t.Setenv("X_LOGGING_FILE", filename)
 	command := exec.Command(os.Args[0], "-test.run=^TestFatalFlushesFileAndExits$")
 	command.Env = append(os.Environ(), "XKITEX_FATAL_TEST_FILE="+filename)
 	err := command.Run()
